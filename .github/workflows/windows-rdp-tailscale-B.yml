@@ -33,9 +33,9 @@ on:
     workflows: ["Windows RDP via Tailscale (A)"]
     types: [completed]
 
-concurrency:
-  group: tailscale-rdp-singleton
-  cancel-in-progress: false
+# concurrency:
+#   group: tailscale-rdp-singleton
+#   cancel-in-progress: false
 
 permissions:
   contents: read
