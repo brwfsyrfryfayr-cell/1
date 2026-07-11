@@ -28,14 +28,9 @@ on:
         required: false
         default: "0"
 
-  # Optional backup: start B when A completes (in case REST dispatch is blocked/rate-limited).
   workflow_run:
     workflows: ["Windows RDP via Tailscale (A)"]
     types: [completed]
-
-# concurrency:
-#   group: tailscale-rdp-singleton
-#   cancel-in-progress: false
 
 permissions:
   contents: read
@@ -124,32 +119,14 @@ jobs:
           Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" | Out-Null
 
-      - name: 🧹 PURGE any devices containing 'bullet' (startup)
-        run: |
-          $hdr = @{ Authorization = "Bearer ${{ steps.cfg.outputs.apikey }}" }
-          $tn  = [uri]::EscapeDataString("${{ steps.cfg.outputs.tailnet }}")
-          $match = { param($d)
-            ($d.name -match '(?i)bullet') -or ($d.hostname -match '(?i)bullet') -or ($d.DNSName -match '(?i)bullet')
-          }
-          try {
-            $resp = Invoke-RestMethod -Method GET -Headers $hdr -Uri "https://api.tailscale.com/api/v2/tailnet/$tn/devices"
-            foreach ($d in $resp.devices) {
-              if (& $match $d) {
-                try {
-                  Invoke-RestMethod -Method DELETE -Headers $hdr -Uri ("https://api.tailscale.com/api/v2/device/{0}" -f $d.id) | Out-Null
-                  Write-Host "Deleted at start: $($d.name)"
-                } catch {}
-              }
-            }
-          } catch { Write-Warning "Startup purge failed: $_" }
-
       - name: 🔗 Tailscale up (hostname=bullet) + show IP/FQDN/DERP
         id: up
         run: |
           $ts = "C:\Program Files\Tailscale\tailscale.exe"
-          & $ts logout | Out-Null
+          # تم إزالة سطر logout للحفاظ على الجلسة السابقة إن وجدت
+          # تم إزالة خطوات الـ Purge لضمان عدم حذف الجهاز من الـ Tailnet
           & $ts up --authkey "${{ steps.cfg.outputs.authkey }}" --hostname "${{ env.TS_HOSTNAME }}" --accept-routes --accept-dns=false
-          Start-Sleep -Seconds 2
+          Start-Sleep -Seconds 5
 
           $ip4 = (& $ts ip -4 | Select-Object -First 1)
           $status = & $ts status --json | ConvertFrom-Json
@@ -170,26 +147,6 @@ jobs:
             Write-Host "RDP alive... ($left min left)"
             Start-Sleep -Seconds 60
           }
-
-      - name: 🧹 PURGE any devices containing 'bullet' (exit)
-        if: always()
-        run: |
-          $hdr = @{ Authorization = "Bearer ${{ steps.cfg.outputs.apikey }}" }
-          $tn  = [uri]::EscapeDataString("${{ steps.cfg.outputs.tailnet }}")
-          $match = { param($d)
-            ($d.name -match '(?i)bullet') -or ($d.hostname -match '(?i)bullet') -or ($d.DNSName -match '(?i)bullet')
-          }
-          try {
-            $resp = Invoke-RestMethod -Method GET -Headers $hdr -Uri "https://api.tailscale.com/api/v2/tailnet/$tn/devices"
-            foreach ($d in $resp.devices) {
-              if (& $match $d) {
-                try {
-                  Invoke-RestMethod -Method DELETE -Headers $hdr -Uri ("https://api.tailscale.com/api/v2/device/{0}" -f $d.id) | Out-Null
-                  Write-Host "Deleted at exit: $($d.name)"
-                } catch {}
-              }
-            }
-          } catch { Write-Warning "Exit purge failed: $_" }
 
       - name: 🔁 Dispatch workflow A (instant, forever by default)
         if: always()
